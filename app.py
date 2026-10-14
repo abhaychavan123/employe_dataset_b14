@@ -1,196 +1,227 @@
-
 import os
 import pickle
 import numpy as np
 import pandas as pd
-import streamlit as st
+from flask import Flask, render_template_string, request
 
-# Configure page settings
-st.set_page_config(
-    page_title="Employee Leave Prediction",
-    page_icon="👔",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+app = Flask(__name__)
 
-# Custom CSS for modern layout, typography, and card shadows
-st.markdown("""
-<style>
-    /* Main app background */
-    .stApp {
-        background-color: #f8fafc;
-    }
+# Exact file name as provided
+MODEL_FILE = "naive_model_b14.pkl"
+model = None
 
-    /* Top title styling */
-    .title-banner {
-        text-align: center;
-        padding: 24px 10px;
-        margin-bottom: 24px;
-        background: #ffffff;
-        border-radius: 16px;
-        border: 1px solid #e2e8f0;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
-    }
-    .title-banner h1 {
-        color: #0f172a;
-        font-size: 2rem;
-        margin-bottom: 8px;
-    }
-    .title-banner p {
-        color: #64748b;
-        font-size: 1rem;
-        margin-bottom: 0;
-    }
+if os.path.exists(MODEL_FILE):
+    with open(MODEL_FILE, "rb") as f:
+        model = pickle.load(f)
 
-    /* Card styling with soft depth shadow */
-    .custom-card {
-        background: #ffffff;
-        border-radius: 16px;
-        padding: 24px;
-        margin-bottom: 20px;
-        border: 1px solid #e2e8f0;
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.04), 0 4px 6px -4px rgba(0, 0, 0, 0.02);
-    }
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Employee Churn Predictor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-body: #0b0f19;
+            --surface: #131b2e;
+            --surface-hover: #1c2640;
+            --border: #23314e;
+            --accent: #3b82f6;
+            --accent-glow: rgba(59, 130, 246, 0.25);
+            --text-heading: #f8fafc;
+            --text-muted: #94a3b8;
+            --stay-bg: rgba(16, 185, 129, 0.12);
+            --stay-border: #10b981;
+            --stay-text: #6ee7b7;
+            --leave-bg: rgba(239, 68, 68, 0.12);
+            --leave-border: #ef4444;
+            --leave-text: #fca5a5;
+        }
 
-    /* Prediction alert cards */
-    .result-stay {
-        background: linear-gradient(135deg, #059669 0%, #10b981 100%);
-        border-radius: 16px;
-        padding: 28px;
-        color: #ffffff;
-        text-align: center;
-        box-shadow: 0 10px 20px -5px rgba(16, 185, 129, 0.4);
-    }
-    .result-leave {
-        background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
-        border-radius: 16px;
-        padding: 28px;
-        color: #ffffff;
-        text-align: center;
-        box-shadow: 0 10px 20px -5px rgba(239, 68, 68, 0.4);
-    }
-    .result-title {
-        font-size: 1.6rem;
-        font-weight: 700;
-        margin-bottom: 8px;
-    }
-    .result-subtitle {
-        font-size: 0.95rem;
-        opacity: 0.9;
-    }
-</style>
-""", unsafe_allow_html=True)
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+        }
 
+        body {
+            background-color: var(--bg-body);
+            color: var(--text-heading);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2.5rem 1rem;
+        }
 
-@st.cache_resource
-def load_model(path="navie_buyes.pkl"):
-    """Load the pickled GaussianNB model."""
-    if not os.path.exists(path):
-        return None
-    with open(path, "rb") as f:
-        return pickle.load(f)
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 1rem;
+            width: 100%;
+            max-width: 680px;
+            padding: 2.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+        }
 
+        .card-header {
+            margin-bottom: 2rem;
+            text-align: center;
+        }
 
-model = load_model("navie_buyes.pkl")
+        .card-header h1 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
 
-# Banner Section
-st.markdown("""
-<div class="title-banner">
-    <h1>👔 Employee Retention Predictor</h1>
-    <p>Predict whether an employee is likely to stay or leave using the trained Naive Bayes classifier</p>
-</div>
-""", unsafe_allow_html=True)
+        .card-header p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            margin-top: 0.4rem;
+        }
 
-if model is None:
-    st.error("⚠️ Model file `navie_buyes.pkl` not found! Ensure the `.pkl` file is in the root directory.")
-    st.stop()
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.25rem;
+        }
 
-# --- Inputs Form Layout ---
-col1, col2 = st.columns(2)
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 0.45rem;
+        }
 
-with col1:
-    st.markdown('<div class="custom-card">', unsafe_allow_html=True)
-    st.subheader("📋 Academic & Location Profile")
-    
-    education_label = st.selectbox("Education Level", ["Bachelors", "Masters", "PhD"])
-    # Standard label encoding matching common dataset splits
-    education_map = {"Bachelors": 0, "Masters": 1, "PhD": 2}
-    education = education_map[education_label]
+        label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+        }
 
-    city_label = st.selectbox("City Location", ["Bangalore", "New Delhi", "Pune"])
-    city_map = {"Bangalore": 0, "New Delhi": 1, "Pune": 2}
-    city = city_map[city_label]
+        input, select {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            background-color: var(--bg-body);
+            border: 1px solid var(--border);
+            color: var(--text-heading);
+            font-size: 0.95rem;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
 
-    joining_year = st.slider("Joining Year", min_value=2010, max_value=2024, value=2017, step=1)
-    payment_tier = st.selectbox("Payment Tier", [1, 2, 3], index=2, 
-                                help="Tier 1 (Highest payment grade) to Tier 3 (Base level)")
-    st.markdown('</div>', unsafe_allow_html=True)
+        input:focus, select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
 
-with col2:
-    st.markdown('<div class="custom-card">', unsafe_allow_html=True)
-    st.subheader("👤 Personal & Experience Details")
+        select option {
+            background-color: var(--bg-body);
+            color: var(--text-heading);
+        }
 
-    age = st.slider("Age", min_value=18, max_value=65, value=28, step=1)
+        .submit-btn {
+            margin-top: 1.5rem;
+            width: 100%;
+            padding: 0.85rem;
+            border-radius: 0.5rem;
+            border: none;
+            background-color: var(--accent);
+            color: #ffffff;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.1s;
+        }
 
-    gender_label = st.radio("Gender", ["Female", "Male"], horizontal=True)
-    gender_map = {"Female": 0, "Male": 1}
-    gender = gender_map[gender_label]
+        .submit-btn:hover {
+            opacity: 0.92;
+        }
 
-    ever_benched_label = st.radio("Ever Put On Bench?", ["No", "Yes"], horizontal=True)
-    ever_benched_map = {"No": 0, "Yes": 1}
-    ever_benched = ever_benched_map[ever_benched_label]
+        .submit-btn:active {
+            transform: scale(0.99);
+        }
 
-    experience = st.slider("Experience In Current Domain (Years)", min_value=0, max_value=15, value=3, step=1)
-    st.markdown('</div>', unsafe_allow_html=True)
+        .result-container {
+            margin-top: 1.75rem;
+            padding: 1.25rem;
+            border-radius: 0.5rem;
+            text-align: center;
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
 
-# Format into DataFrame with exact feature names matching training data
-input_df = pd.DataFrame([{
-    'Education': education,
-    'JoiningYear': joining_year,
-    'City': city,
-    'PaymentTier': payment_tier,
-    'Age': age,
-    'Gender': gender,
-    'EverBenched': ever_benched,
-    'ExperienceInCurrentDomain': experience
-}])
+        .result-container.leave {
+            background: var(--leave-bg);
+            border: 1px solid var(--leave-border);
+            color: var(--leave-text);
+        }
 
-# --- Prediction Action Section ---
-st.markdown('<div class="custom-card">', unsafe_allow_html=True)
-st.subheader("🔮 Run Inference")
+        .result-container.stay {
+            background: var(--stay-bg);
+            border: 1px solid var(--stay-border);
+            color: var(--stay-text);
+        }
 
-pred_col1, pred_col2 = st.columns([1, 2])
+        .confidence {
+            display: block;
+            margin-top: 0.4rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            opacity: 0.9;
+        }
 
-with pred_col1:
-    st.write("Evaluate model outcome on selected attributes:")
-    run_prediction = st.button("🚀 Predict Employee Status", type="primary", use_container_width=True)
+        @media (max-width: 640px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+            .card {
+                padding: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="card-header">
+            <h1>Employee Turnover Predictor</h1>
+            <p>GaussianNB Inference Service</p>
+        </div>
 
-with pred_col2:
-    if run_prediction:
-        try:
-            pred = model.predict(input_df)[0]
-            probs = model.predict_proba(input_df)[0]
-
-            if pred == 1:
-                st.markdown(f"""
-                <div class="result-leave">
-                    <div class="result-title">⚠️ Likely to Leave (Class 1)</div>
-                    <div class="result-subtitle">Model Confidence: <strong>{probs[1] * 100:.1f}%</strong> probability of churn</div>
+        <form method="POST" action="/">
+            <div class="grid">
+                <div class="field">
+                    <label for="Education">Education</label>
+                    <select id="Education" name="Education" required>
+                        <option value="0">Bachelors</option>
+                        <option value="1">Masters</option>
+                        <option value="2">PHD</option>
+                    </select>
                 </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                <div class="result-stay">
-                    <div class="result-title">✅ Likely to Stay (Class 0)</div>
-                    <div class="result-subtitle">Model Confidence: <strong>{probs[0] * 100:.1f}%</strong> probability of retention</div>
+
+                <div class="field">
+                    <label for="JoiningYear">Joining Year</label>
+                    <input type="number" id="JoiningYear" name="JoiningYear" min="2000" max="2035" value="2017" required>
                 </div>
-                """, unsafe_allow_html=True)
-        except Exception as e:
-            st.error(f"Error during prediction: {e}")
-    else:
-        st.info("Click **Predict Employee Status** to generate the prediction.")
 
-st.markdown('</div>', unsafe_allow_html=True)
+                <div class="field">
+                    <label for="City">City</label>
+                    <select id="City" name="City" required>
+                        <option value="0">Bangalore</option>
+                        <option value="1">Pune</option>
+                        <option value="2">New Delhi</option>
+                    </select>
+                </div>
 
-with st.expander("🔍 View Raw Transformed Features"):
-    st.dataframe(input_df, use_container_width=True)
+                <div class="field">
+                    <label for="PaymentTier">Payment Tier</label>
+                    <select id="PaymentTier" name="PaymentTier" required>
+                        <option value="1">Tier 1</option>
+                        <option value="2">Tier 2</option>
+                        <option value="3" selected>
